@@ -1,10 +1,10 @@
 @echo off
-REM Script para ejecutar la Interfaz Grafica de ili2pg
+REM Script para ejecutar el Administrador de Modelos LADM
 REM Agencia Catastral de Cundinamarca (ACC)
 
 echo.
 echo ==========================================
-echo   Generador de Modelos INTERLIS
+echo   Administrador de Modelos LADM
 echo   Agencia Catastral de Cundinamarca
 echo ==========================================
 echo.

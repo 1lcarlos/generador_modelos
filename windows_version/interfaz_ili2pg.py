@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Interfaz Grafica para Generacion de Modelos INTERLIS
+Administrador de Modelos LADM
 Agencia Catastral de Cundinamarca (ACC)
 
-Permite generar modelos fisicos en PostgreSQL/PostGIS
-a partir de archivos INTERLIS (.ili) usando ili2pg.
+Permite crear esquemas LADM-COL en PostgreSQL/PostGIS,
+exportar datos a XTF y validar archivos XTF usando
+ili2pg e ilivalidator.
 
 Autor: ACC - Area de Desarrollo
-Version: 1.0
+Version: 2.0
 Fecha: 2025
 """
 
@@ -26,8 +27,8 @@ from pathlib import Path
 # CONSTANTES Y CONFIGURACION
 # ============================================
 
-APP_NAME = "Generador de Modelos INTERLIS"
-APP_VERSION = "1.0"
+APP_NAME = "Administrador de Modelos LADM"
+APP_VERSION = "2.0"
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".ili2pg_gui")
 PROFILES_FILE = os.path.join(CONFIG_DIR, "profiles.json")
 LAST_PROFILE_FILE = os.path.join(CONFIG_DIR, "last_profile.json")
@@ -54,6 +55,8 @@ ILI2PG_OPTIONS = {
     "createTidCol": {"label": "Create TID Column", "description": "Crear columna TID", "default": True},
     "smart2Inheritance": {"label": "Smart 2 Inheritance", "description": "Herencia inteligente tipo 2", "default": True},
     "strokeArcs": {"label": "Stroke Arcs", "description": "Convertir arcos a segmentos", "default": True},
+    "createDatasetCol": {"label": "Create Dataset Col", "description": "Crear columna de dataset", "default": True},
+    "createBasketCol": {"label": "Create Basket Col", "description": "Crear columna de basket", "default": True},
 }
 
 # ============================================
@@ -72,6 +75,16 @@ class Ili2pgGUI:
         self.selected_models = []  # Lista de modelos seleccionados
         self.is_running = False
         self.process = None
+
+        # Variables de exportacion XTF
+        self.export_is_running = False
+        self.export_process = None
+        self.export_schemas_detected = []  # Esquemas detectados en BD
+
+        # Variables de validacion XTF
+        self.validate_is_running = False
+        self.validate_process = None
+        self.validate_xtf_files = []  # Archivos XTF encontrados
 
         # Crear directorio de configuracion
         os.makedirs(CONFIG_DIR, exist_ok=True)
@@ -101,15 +114,20 @@ class Ili2pgGUI:
         self.notebook.add(self.tab_config, text="Configuracion")
         self.create_config_tab()
 
-        # Pestana 2: Opciones ili2pg
-        self.tab_options = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(self.tab_options, text="Opciones ili2pg")
-        self.create_options_tab()
-
-        # Pestana 3: Ejecucion
+        # Pestana 2: Crear Esquemas
         self.tab_execute = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(self.tab_execute, text="Ejecucion")
+        self.notebook.add(self.tab_execute, text="Crear Esquemas")
         self.create_execute_tab()
+
+        # Pestana 4: Exportar XTF
+        self.tab_export = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(self.tab_export, text="Exportar XTF")
+        self.create_export_tab()
+
+        # Pestana 5: Validar XTF
+        self.tab_validate = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(self.tab_validate, text="Validar XTF")
+        self.create_validate_tab()
 
         # Barra de estado
         self.status_var = tk.StringVar(value="Listo")
@@ -117,23 +135,32 @@ class Ili2pgGUI:
         status_bar.pack(fill=tk.X, pady=(5, 0))
 
     def create_config_tab(self):
-        """Crear pestana de configuracion"""
+        """Crear pestana de configuracion (panel izquierdo) y opciones ili2pg (panel derecho)"""
 
-        # Canvas con scroll para contenido largo
-        canvas = tk.Canvas(self.tab_config)
-        scrollbar = ttk.Scrollbar(self.tab_config, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
+        # PanedWindow horizontal para dividir en dos columnas
+        paned = ttk.PanedWindow(self.tab_config, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True)
 
-        scrollable_frame.bind(
+        # ==============================
+        # PANEL IZQUIERDO: Configuracion
+        # ==============================
+        left_frame = ttk.Frame(paned)
+        paned.add(left_frame, weight=3)
+
+        canvas_left = tk.Canvas(left_frame)
+        scrollbar_left = ttk.Scrollbar(left_frame, orient="vertical", command=canvas_left.yview)
+        scrollable_left = ttk.Frame(canvas_left)
+
+        scrollable_left.bind(
             "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            lambda e: canvas_left.configure(scrollregion=canvas_left.bbox("all"))
         )
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas_left.create_window((0, 0), window=scrollable_left, anchor="nw")
+        canvas_left.configure(yscrollcommand=scrollbar_left.set)
 
         # ========== SECCION: Perfiles ==========
-        profile_frame = ttk.LabelFrame(scrollable_frame, text="Perfiles de Configuracion", padding="10")
+        profile_frame = ttk.LabelFrame(scrollable_left, text="Perfiles de Configuracion", padding="10")
         profile_frame.pack(fill=tk.X, pady=(0, 10))
 
         profile_inner = ttk.Frame(profile_frame)
@@ -152,7 +179,7 @@ class Ili2pgGUI:
         self.refresh_profiles_list()
 
         # ========== SECCION: Rutas ==========
-        paths_frame = ttk.LabelFrame(scrollable_frame, text="Rutas de Archivos", padding="10")
+        paths_frame = ttk.LabelFrame(scrollable_left, text="Rutas de Archivos", padding="10")
         paths_frame.pack(fill=tk.X, pady=(0, 10))
 
         # Ruta ili2pg JAR
@@ -174,7 +201,7 @@ class Ili2pgGUI:
                                 "Seleccionar carpeta para logs")
 
         # ========== SECCION: Modelos Disponibles ==========
-        models_frame = ttk.LabelFrame(scrollable_frame, text="Modelos INTERLIS Disponibles (Seleccion Multiple)", padding="10")
+        models_frame = ttk.LabelFrame(scrollable_left, text="Modelos INTERLIS Disponibles (Seleccion Multiple)", padding="10")
         models_frame.pack(fill=tk.X, pady=(0, 10))
 
         models_inner = ttk.Frame(models_frame)
@@ -208,7 +235,7 @@ class Ili2pgGUI:
         self.selected_models_text.pack(fill=tk.X, pady=(2, 0))
 
         # ========== SECCION: Base de Datos ==========
-        db_frame = ttk.LabelFrame(scrollable_frame, text="Conexion a Base de Datos", padding="10")
+        db_frame = ttk.LabelFrame(scrollable_left, text="Conexion a Base de Datos", padding="10")
         db_frame.pack(fill=tk.X, pady=(0, 10))
 
         # Grid para campos de BD
@@ -252,7 +279,7 @@ class Ili2pgGUI:
         ttk.Button(db_grid, text="Probar Conexion", command=self.test_connection).grid(row=2, column=3, padx=5)
 
         # ========== SECCION: Esquemas ==========
-        schemas_frame = ttk.LabelFrame(scrollable_frame, text="Esquemas a Crear", padding="10")
+        schemas_frame = ttk.LabelFrame(scrollable_left, text="Esquemas a Crear", padding="10")
         schemas_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(schemas_frame, text="Ingrese los nombres de los esquemas (uno por linea):").pack(anchor=tk.W)
@@ -265,7 +292,7 @@ class Ili2pgGUI:
         schemas_help.pack(anchor=tk.W)
 
         # ========== SECCION: SRS ==========
-        srs_frame = ttk.LabelFrame(scrollable_frame, text="Sistema de Referencia Espacial", padding="10")
+        srs_frame = ttk.LabelFrame(scrollable_left, text="Sistema de Referencia Espacial", padding="10")
         srs_frame.pack(fill=tk.X, pady=(0, 10))
 
         srs_inner = ttk.Frame(srs_frame)
@@ -278,42 +305,41 @@ class Ili2pgGUI:
 
         ttk.Label(srs_inner, text="(9377 = MAGNA-SIRGAS / CTM12)", foreground="gray").pack(side=tk.LEFT, padx=10)
 
-        # Empaquetar canvas y scrollbar
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Empaquetar canvas y scrollbar del panel izquierdo
+        canvas_left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar_left.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Bind mousewheel
-        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
+        # ==============================
+        # PANEL DERECHO: Opciones ili2pg
+        # ==============================
+        right_frame = ttk.Frame(paned)
+        paned.add(right_frame, weight=2)
 
-    def create_options_tab(self):
-        """Crear pestana de opciones ili2pg"""
+        canvas_right = tk.Canvas(right_frame)
+        scrollbar_right = ttk.Scrollbar(right_frame, orient="vertical", command=canvas_right.yview)
+        scrollable_right = ttk.Frame(canvas_right)
 
-        # Frame con scroll
-        canvas = tk.Canvas(self.tab_options)
-        scrollbar = ttk.Scrollbar(self.tab_options, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas)
-
-        scrollable_frame.bind(
+        scrollable_right.bind(
             "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            lambda e: canvas_right.configure(scrollregion=canvas_right.bbox("all"))
         )
 
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas_right.create_window((0, 0), window=scrollable_right, anchor="nw")
+        canvas_right.configure(yscrollcommand=scrollbar_right.set)
 
         # Titulo
-        ttk.Label(scrollable_frame, text="Opciones de ili2pg", font=("", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        ttk.Label(scrollable_right, text="Opciones de ili2pg", font=("", 12, "bold")).pack(anchor=tk.W, pady=(0, 10))
 
         # Botones rapidos
-        quick_frame = ttk.Frame(scrollable_frame)
+        quick_frame = ttk.Frame(scrollable_right)
         quick_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Button(quick_frame, text="Seleccionar Todas", command=self.select_all_options).pack(side=tk.LEFT, padx=2)
         ttk.Button(quick_frame, text="Deseleccionar Todas", command=self.deselect_all_options).pack(side=tk.LEFT, padx=2)
-        ttk.Button(quick_frame, text="Restaurar Predeterminadas", command=self.reset_options).pack(side=tk.LEFT, padx=2)
+        ttk.Button(quick_frame, text="Restaurar", command=self.reset_options).pack(side=tk.LEFT, padx=2)
 
         # Frame para opciones
-        options_frame = ttk.LabelFrame(scrollable_frame, text="Opciones Disponibles", padding="10")
+        options_frame = ttk.LabelFrame(scrollable_right, text="Opciones Disponibles", padding="10")
         options_frame.pack(fill=tk.BOTH, expand=True)
 
         # Crear checkboxes para cada opcion
@@ -331,8 +357,23 @@ class Ili2pgGUI:
 
             ttk.Label(frame, text=f"  ({option_info['description']})", foreground="gray").pack(side=tk.LEFT)
 
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Empaquetar canvas y scrollbar del panel derecho
+        canvas_right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar_right.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Bind mousewheel al canvas que tiene el foco
+        def _on_mousewheel_left(event):
+            canvas_left.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        def _on_mousewheel_right(event):
+            canvas_right.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        def _bind_mousewheel(canvas, handler):
+            canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", handler))
+            canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        _bind_mousewheel(canvas_left, _on_mousewheel_left)
+        _bind_mousewheel(canvas_right, _on_mousewheel_right)
 
     def create_execute_tab(self):
         """Crear pestana de ejecucion"""
@@ -474,6 +515,26 @@ class Ili2pgGUI:
             "schemas": self.schemas_text.get("1.0", tk.END).strip(),
             "srs_code": self.srs_code.get(),
             "options": {name: var.get() for name, var in self.option_vars.items()},
+            # Configuracion de exportacion XTF
+            "export": {
+                "jar_path": self.export_jar_path.get(),
+                "modeldir": self.export_modeldir.get(),
+                "output_path": self.export_output_path.get(),
+                "model_name": self.export_model_name.get(),
+                "srs_code": self.export_srs_code.get(),
+                "db_host": self.export_db_host.get(),
+                "db_port": self.export_db_port.get(),
+                "db_name": self.export_db_name.get(),
+                "db_user": self.export_db_user.get(),
+                "db_password": self.export_db_password.get(),
+            },
+            # Configuracion de validacion XTF
+            "validation": {
+                "jar_path": self.validate_jar_path.get(),
+                "modeldir": self.validate_modeldir.get(),
+                "model_name": self.validate_model_name.get(),
+                "input_path": self.validate_input_path.get(),
+            },
         }
 
     def set_config(self, config):
@@ -500,6 +561,28 @@ class Ili2pgGUI:
         options = config.get("options", {})
         for name, var in self.option_vars.items():
             var.set(options.get(name, ILI2PG_OPTIONS[name]["default"]))
+
+        # Configuracion de exportacion XTF
+        export = config.get("export", {})
+        if export:
+            set_entry(self.export_jar_path, export.get("jar_path", ""))
+            set_entry(self.export_modeldir, export.get("modeldir", ""))
+            set_entry(self.export_output_path, export.get("output_path", ""))
+            set_entry(self.export_model_name, export.get("model_name", "Modelo_Aplicacion_LADMCOL_SINIC_V1_0"))
+            set_entry(self.export_srs_code, export.get("srs_code", "9377"))
+            set_entry(self.export_db_host, export.get("db_host", "localhost"))
+            set_entry(self.export_db_port, export.get("db_port", "5432"))
+            set_entry(self.export_db_name, export.get("db_name", ""))
+            set_entry(self.export_db_user, export.get("db_user", "postgres"))
+            set_entry(self.export_db_password, export.get("db_password", ""))
+
+        # Configuracion de validacion XTF
+        validation = config.get("validation", {})
+        if validation:
+            set_entry(self.validate_jar_path, validation.get("jar_path", ""))
+            set_entry(self.validate_modeldir, validation.get("modeldir", ""))
+            set_entry(self.validate_model_name, validation.get("model_name", "Modelo_Aplicacion_LADMCOL_SINIC_V1_0"))
+            set_entry(self.validate_input_path, validation.get("input_path", ""))
 
         # Actualizar lista de modelos y seleccionar los guardados
         self.refresh_models_list()
@@ -1124,17 +1207,952 @@ class Ili2pgGUI:
             self.log_message("Deteniendo proceso...", "warning")
 
     # ============================================
+    # METODOS DE EXPORTACION XTF
+    # ============================================
+
+    def create_export_tab(self):
+        """Crear pestana de exportacion XTF"""
+
+        # Canvas con scroll
+        canvas = tk.Canvas(self.tab_export)
+        scrollbar = ttk.Scrollbar(self.tab_export, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # ========== SECCION: Rutas de Exportacion ==========
+        paths_frame = ttk.LabelFrame(scrollable_frame, text="Rutas de Archivos", padding="10")
+        paths_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Ruta ili2pg JAR
+        jar_frame = ttk.Frame(paths_frame)
+        jar_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(jar_frame, text="Archivo ili2pg.jar:", width=20).pack(side=tk.LEFT)
+        self.export_jar_path = ttk.Entry(jar_frame, width=60)
+        self.export_jar_path.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        def browse_export_jar():
+            filename = filedialog.askopenfilename(
+                title="Seleccionar archivo JAR de ili2pg",
+                filetypes=[("JAR files", "*.jar"), ("All files", "*.*")])
+            if filename:
+                self.export_jar_path.delete(0, tk.END)
+                self.export_jar_path.insert(0, filename)
+
+        ttk.Button(jar_frame, text="Examinar...", command=browse_export_jar).pack(side=tk.LEFT)
+
+        # Carpeta de modelos (modeldir)
+        modeldir_frame = ttk.Frame(paths_frame)
+        modeldir_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(modeldir_frame, text="Carpeta de modelos:", width=20).pack(side=tk.LEFT)
+        self.export_modeldir = ttk.Entry(modeldir_frame, width=60)
+        self.export_modeldir.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        def browse_export_modeldir():
+            folder = filedialog.askdirectory(title="Seleccionar carpeta con archivos de modelo")
+            if folder:
+                self.export_modeldir.delete(0, tk.END)
+                self.export_modeldir.insert(0, folder)
+
+        ttk.Button(modeldir_frame, text="Examinar...", command=browse_export_modeldir).pack(side=tk.LEFT)
+
+        # Carpeta de salida (donde se crean las subcarpetas)
+        output_frame = ttk.Frame(paths_frame)
+        output_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(output_frame, text="Carpeta de salida:", width=20).pack(side=tk.LEFT)
+        self.export_output_path = ttk.Entry(output_frame, width=60)
+        self.export_output_path.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        def browse_export_output():
+            folder = filedialog.askdirectory(title="Seleccionar carpeta de salida para archivos XTF")
+            if folder:
+                self.export_output_path.delete(0, tk.END)
+                self.export_output_path.insert(0, folder)
+
+        ttk.Button(output_frame, text="Examinar...", command=browse_export_output).pack(side=tk.LEFT)
+
+        # ========== SECCION: Modelo y SRS ==========
+        model_frame = ttk.LabelFrame(scrollable_frame, text="Modelo y Sistema de Referencia", padding="10")
+        model_frame.pack(fill=tk.X, pady=(0, 10))
+
+        model_grid = ttk.Frame(model_frame)
+        model_grid.pack(fill=tk.X)
+
+        ttk.Label(model_grid, text="Nombre del modelo:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.export_model_name = ttk.Entry(model_grid, width=50)
+        self.export_model_name.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        self.export_model_name.insert(0, "Modelo_Aplicacion_LADMCOL_SINIC_V1_0")
+
+        ttk.Label(model_grid, text="Codigo EPSG:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.export_srs_code = ttk.Entry(model_grid, width=10)
+        self.export_srs_code.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        self.export_srs_code.insert(0, "9377")
+        ttk.Label(model_grid, text="(9377 = MAGNA-SIRGAS / CTM12)", foreground="gray").grid(row=1, column=2, sticky=tk.W, padx=10)
+
+        # ========== SECCION: Conexion BD para Exportacion ==========
+        db_frame = ttk.LabelFrame(scrollable_frame, text="Conexion a Base de Datos", padding="10")
+        db_frame.pack(fill=tk.X, pady=(0, 10))
+
+        db_grid = ttk.Frame(db_frame)
+        db_grid.pack(fill=tk.X)
+
+        ttk.Label(db_grid, text="Host:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self.export_db_host = ttk.Entry(db_grid, width=30)
+        self.export_db_host.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        self.export_db_host.insert(0, "localhost")
+
+        ttk.Label(db_grid, text="Puerto:").grid(row=0, column=2, sticky=tk.W, padx=(20, 0), pady=2)
+        self.export_db_port = ttk.Entry(db_grid, width=10)
+        self.export_db_port.grid(row=0, column=3, sticky=tk.W, padx=5, pady=2)
+        self.export_db_port.insert(0, "5432")
+
+        ttk.Label(db_grid, text="Base de datos:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.export_db_name = ttk.Entry(db_grid, width=30)
+        self.export_db_name.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+
+        ttk.Label(db_grid, text="Usuario:").grid(row=1, column=2, sticky=tk.W, padx=(20, 0), pady=2)
+        self.export_db_user = ttk.Entry(db_grid, width=20)
+        self.export_db_user.grid(row=1, column=3, sticky=tk.W, padx=5, pady=2)
+        self.export_db_user.insert(0, "postgres")
+
+        ttk.Label(db_grid, text="Password:").grid(row=2, column=0, sticky=tk.W, pady=2)
+        self.export_db_password = ttk.Entry(db_grid, width=30, show="*")
+        self.export_db_password.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
+
+        self.export_show_pwd_var = tk.BooleanVar()
+        ttk.Checkbutton(db_grid, text="Mostrar", variable=self.export_show_pwd_var,
+                       command=self.toggle_export_password).grid(row=2, column=2, sticky=tk.W, padx=(20, 0))
+
+        ttk.Button(db_grid, text="Probar Conexion", command=self.test_export_connection).grid(row=2, column=3, padx=5)
+
+        # ========== SECCION: Esquemas a Exportar ==========
+        schemas_frame = ttk.LabelFrame(scrollable_frame, text="Esquemas a Exportar", padding="10")
+        schemas_frame.pack(fill=tk.X, pady=(0, 10))
+
+        schemas_btn_frame = ttk.Frame(schemas_frame)
+        schemas_btn_frame.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Button(schemas_btn_frame, text="Detectar Esquemas (cun*)",
+                  command=self.detect_export_schemas).pack(side=tk.LEFT, padx=2)
+        ttk.Button(schemas_btn_frame, text="Seleccionar Todos",
+                  command=self.select_all_export_schemas).pack(side=tk.LEFT, padx=2)
+        ttk.Button(schemas_btn_frame, text="Deseleccionar Todos",
+                  command=self.deselect_all_export_schemas).pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(schemas_btn_frame, text="  (Ctrl+Click para seleccion multiple)", foreground="gray").pack(side=tk.LEFT, padx=10)
+
+        # Listbox de esquemas detectados
+        schemas_list_frame = ttk.Frame(schemas_frame)
+        schemas_list_frame.pack(fill=tk.X, pady=(5, 0))
+
+        self.export_schemas_listbox = tk.Listbox(schemas_list_frame, height=8, selectmode=tk.EXTENDED, exportselection=False)
+        schemas_scrollbar = ttk.Scrollbar(schemas_list_frame, orient=tk.VERTICAL, command=self.export_schemas_listbox.yview)
+        self.export_schemas_listbox.configure(yscrollcommand=schemas_scrollbar.set)
+
+        self.export_schemas_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        schemas_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Info de seleccion
+        self.export_schemas_info = ttk.Label(schemas_frame, text="0 esquema(s) detectado(s), 0 seleccionado(s)", foreground="gray")
+        self.export_schemas_info.pack(anchor=tk.W, pady=(5, 0))
+
+        self.export_schemas_listbox.bind("<<ListboxSelect>>", self.on_export_schema_selected)
+
+        # ========== SECCION: Ejecucion de Exportacion ==========
+        exec_frame = ttk.LabelFrame(scrollable_frame, text="Ejecucion", padding="10")
+        exec_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Botones de control
+        control_frame = ttk.Frame(exec_frame)
+        control_frame.pack(fill=tk.X)
+
+        self.export_execute_btn = ttk.Button(control_frame, text="EXPORTAR XTF", command=self.execute_export)
+        self.export_execute_btn.pack(side=tk.LEFT, padx=2)
+
+        self.export_stop_btn = ttk.Button(control_frame, text="DETENER", command=self.stop_export, state=tk.DISABLED)
+        self.export_stop_btn.pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(control_frame,
+                 text="Se creara una carpeta por cada esquema con el archivo .xtf y .txt (log)",
+                 foreground="gray", font=("", 8)).pack(side=tk.LEFT, padx=20)
+
+        # Log de exportacion
+        log_frame = ttk.LabelFrame(scrollable_frame, text="Log de Exportacion", padding="10")
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.export_log_text = scrolledtext.ScrolledText(log_frame, height=12, wrap=tk.WORD)
+        self.export_log_text.pack(fill=tk.BOTH, expand=True)
+
+        self.export_log_text.tag_configure("info", foreground="black")
+        self.export_log_text.tag_configure("success", foreground="green")
+        self.export_log_text.tag_configure("error", foreground="red")
+        self.export_log_text.tag_configure("warning", foreground="orange")
+        self.export_log_text.tag_configure("command", foreground="blue")
+
+        log_buttons = ttk.Frame(log_frame)
+        log_buttons.pack(fill=tk.X, pady=(5, 0))
+
+        ttk.Button(log_buttons, text="Limpiar Log", command=self.clear_export_log).pack(side=tk.LEFT, padx=2)
+        ttk.Button(log_buttons, text="Guardar Log", command=self.save_export_log).pack(side=tk.LEFT, padx=2)
+
+        # Empaquetar canvas y scrollbar
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def toggle_export_password(self):
+        """Mostrar/ocultar password de exportacion"""
+        if self.export_show_pwd_var.get():
+            self.export_db_password.config(show="")
+        else:
+            self.export_db_password.config(show="*")
+
+    def test_export_connection(self):
+        """Probar conexion a la BD de exportacion"""
+        try:
+            import psycopg2
+
+            conn = psycopg2.connect(
+                host=self.export_db_host.get(),
+                port=self.export_db_port.get(),
+                database=self.export_db_name.get() or "postgres",
+                user=self.export_db_user.get(),
+                password=self.export_db_password.get()
+            )
+            conn.close()
+
+            messagebox.showinfo("Conexion Exitosa",
+                              f"Conexion exitosa a PostgreSQL en {self.export_db_host.get()}:{self.export_db_port.get()}")
+            self.status_var.set("Conexion a BD de exportacion exitosa")
+
+        except ImportError:
+            messagebox.showerror("Error", "Libreria psycopg2 no instalada.\nEjecute: pip install psycopg2-binary")
+        except Exception as e:
+            messagebox.showerror("Error de Conexion", f"No se pudo conectar a la base de datos:\n{str(e)}")
+            self.status_var.set("Error de conexion a BD de exportacion")
+
+    def detect_export_schemas(self):
+        """Detectar esquemas que empiezan con 'cun' en la base de datos"""
+        try:
+            import psycopg2
+
+            db_name = self.export_db_name.get()
+            if not db_name:
+                messagebox.showwarning("Aviso", "Ingrese el nombre de la base de datos")
+                return
+
+            conn = psycopg2.connect(
+                host=self.export_db_host.get(),
+                port=self.export_db_port.get(),
+                database=db_name,
+                user=self.export_db_user.get(),
+                password=self.export_db_password.get()
+            )
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT schema_name
+                FROM information_schema.schemata
+                WHERE schema_name LIKE 'cun%'
+                  AND schema_name NOT LIKE '%\\_mi'
+                ORDER BY schema_name
+            """)
+            schemas = [row[0] for row in cur.fetchall()]
+            cur.close()
+            conn.close()
+
+            # Actualizar listbox
+            self.export_schemas_listbox.delete(0, tk.END)
+            self.export_schemas_detected = schemas
+
+            for schema in schemas:
+                self.export_schemas_listbox.insert(tk.END, schema)
+
+            self.export_schemas_info.config(
+                text=f"{len(schemas)} esquema(s) detectado(s), 0 seleccionado(s)")
+            self.status_var.set(f"{len(schemas)} esquemas 'cun*' detectados en '{db_name}'")
+
+            if not schemas:
+                messagebox.showinfo("Info", f"No se encontraron esquemas que empiecen con 'cun' en '{db_name}'")
+
+        except ImportError:
+            messagebox.showerror("Error", "Libreria psycopg2 no instalada.\nEjecute: pip install psycopg2-binary")
+        except Exception as e:
+            messagebox.showerror("Error", f"Error detectando esquemas:\n{str(e)}")
+
+    def on_export_schema_selected(self, event):
+        """Evento al seleccionar esquema(s) de exportacion"""
+        selected = self.export_schemas_listbox.curselection()
+        total = len(self.export_schemas_detected)
+        self.export_schemas_info.config(
+            text=f"{total} esquema(s) detectado(s), {len(selected)} seleccionado(s)")
+
+    def select_all_export_schemas(self):
+        """Seleccionar todos los esquemas de exportacion"""
+        self.export_schemas_listbox.select_set(0, tk.END)
+        self.on_export_schema_selected(None)
+
+    def deselect_all_export_schemas(self):
+        """Deseleccionar todos los esquemas de exportacion"""
+        self.export_schemas_listbox.select_clear(0, tk.END)
+        self.on_export_schema_selected(None)
+
+    def get_selected_export_schemas(self):
+        """Obtener lista de esquemas seleccionados para exportar"""
+        selection = self.export_schemas_listbox.curselection()
+        return [self.export_schemas_detected[i] for i in selection]
+
+    def get_schema_number(self, schema_name):
+        """Extraer el numero del esquema quitando el prefijo 'cun'"""
+        if schema_name.lower().startswith("cun"):
+            return schema_name[3:]
+        return schema_name
+
+    def build_export_command(self, schema, log_file, xtf_file):
+        """Construir comando ili2pg para exportar un esquema a XTF"""
+        cmd = [
+            'java', '-jar', self.export_jar_path.get(),
+            '--export',
+            '--exportTid',
+            '--dbhost', self.export_db_host.get(),
+            '--dbport', self.export_db_port.get(),
+            '--dbdatabase', self.export_db_name.get(),
+            '--dbusr', self.export_db_user.get(),
+            '--dbpwd', self.export_db_password.get(),
+            '--dbschema', schema,
+            '--defaultSrsCode', self.export_srs_code.get(),
+            '--models', self.export_model_name.get(),
+        ]
+
+        # Agregar modeldir si se especifico
+        modeldir = self.export_modeldir.get()
+        if modeldir:
+            cmd.extend(['--modeldir', modeldir])
+
+        # Agregar log
+        cmd.extend(['--log', log_file])
+
+        # Archivo XTF de salida (ultimo argumento)
+        cmd.append(xtf_file)
+
+        return cmd
+
+    def build_export_command_display(self, schema, log_file, xtf_file):
+        """Construir comando de exportacion para mostrar (sin password)"""
+        cmd = self.build_export_command(schema, log_file, xtf_file)
+        cmd_display = cmd.copy()
+        try:
+            pwd_index = cmd_display.index('--dbpwd')
+            cmd_display[pwd_index + 1] = '****'
+        except ValueError:
+            pass
+        return ' '.join(cmd_display)
+
+    def validate_export_config(self):
+        """Validar configuracion de exportacion"""
+        errors = []
+
+        if not self.export_jar_path.get() or not os.path.exists(self.export_jar_path.get()):
+            errors.append("Archivo ili2pg.jar no especificado o no existe")
+
+        if not self.export_model_name.get():
+            errors.append("Nombre del modelo no especificado")
+
+        if not self.export_output_path.get():
+            errors.append("Carpeta de salida no especificada")
+
+        if not self.export_db_host.get():
+            errors.append("Host de base de datos no especificado")
+
+        if not self.export_db_name.get():
+            errors.append("Nombre de base de datos no especificado")
+
+        if not self.export_db_user.get():
+            errors.append("Usuario de base de datos no especificado")
+
+        if not self.get_selected_export_schemas():
+            errors.append("No hay esquemas seleccionados para exportar")
+
+        return errors
+
+    def export_log_message(self, message, tag="info"):
+        """Agregar mensaje al log de exportacion"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.export_log_text.insert(tk.END, f"[{timestamp}] {message}\n", tag)
+        self.export_log_text.see(tk.END)
+        self.root.update_idletasks()
+
+    def clear_export_log(self):
+        """Limpiar log de exportacion"""
+        self.export_log_text.delete("1.0", tk.END)
+
+    def save_export_log(self):
+        """Guardar log de exportacion a archivo"""
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".log",
+            filetypes=[("Log files", "*.log"), ("Text files", "*.txt"), ("All files", "*.*")],
+            initialfilename=f"export_xtf_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        )
+        if filename:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(self.export_log_text.get("1.0", tk.END))
+            self.status_var.set(f"Log de exportacion guardado: {filename}")
+
+    def execute_export(self):
+        """Ejecutar exportacion de esquemas a XTF"""
+        errors = self.validate_export_config()
+        if errors:
+            messagebox.showerror("Errores de Configuracion", "\n".join(errors))
+            return
+
+        schemas = self.get_selected_export_schemas()
+        output_path = self.export_output_path.get()
+
+        # Mostrar resumen con nombres de carpetas
+        schemas_preview = []
+        for s in schemas[:10]:
+            num = self.get_schema_number(s)
+            schemas_preview.append(f"  - {s}  ->  carpeta: {num}/")
+        if len(schemas) > 10:
+            schemas_preview.append(f"  ... y {len(schemas)-10} mas")
+
+        confirm_msg = f"RESUMEN DE EXPORTACION XTF\n\n"
+        confirm_msg += f"Base de datos: {self.export_db_name.get()}\n"
+        confirm_msg += f"Modelo: {self.export_model_name.get()}\n"
+        confirm_msg += f"Carpeta de salida: {output_path}\n\n"
+        confirm_msg += f"Esquemas a exportar ({len(schemas)}):\n"
+        confirm_msg += "\n".join(schemas_preview)
+        confirm_msg += "\n\nContinuar?"
+
+        if not messagebox.askyesno("Confirmar Exportacion", confirm_msg):
+            return
+
+        self.export_is_running = True
+        self.export_execute_btn.config(state=tk.DISABLED)
+        self.export_stop_btn.config(state=tk.NORMAL)
+
+        thread = threading.Thread(target=self.execute_export_schemas, args=(schemas, output_path))
+        thread.daemon = True
+        thread.start()
+
+    def execute_export_schemas(self, schemas, output_path):
+        """Ejecutar exportacion de esquemas (en hilo separado)"""
+        self.export_log_message("=" * 60, "info")
+        self.export_log_message("INICIO DE PROCESO - EXPORTACION XTF", "info")
+        self.export_log_message("=" * 60, "info")
+        self.export_log_message(f"Base de datos: {self.export_db_name.get()}", "info")
+        self.export_log_message(f"Modelo: {self.export_model_name.get()}", "info")
+        self.export_log_message(f"Carpeta de salida: {output_path}", "info")
+        self.export_log_message(f"Esquemas: {len(schemas)}", "info")
+        self.export_log_message("", "info")
+
+        successful = 0
+        failed = 0
+
+        for i, schema in enumerate(schemas, 1):
+            if not self.export_is_running:
+                self.export_log_message("Proceso detenido por el usuario", "warning")
+                break
+
+            schema_number = self.get_schema_number(schema)
+
+            self.export_log_message("", "info")
+            self.export_log_message(f"[{i}/{len(schemas)}] Exportando esquema: {schema} -> {schema_number}", "info")
+            self.export_log_message("-" * 40, "info")
+            self.status_var.set(f"Exportando {schema} ({i}/{len(schemas)})")
+
+            try:
+                # Crear carpeta con el numero del esquema
+                schema_folder = os.path.join(output_path, schema_number)
+                os.makedirs(schema_folder, exist_ok=True)
+                self.export_log_message(f"Carpeta creada: {schema_folder}", "info")
+
+                # Definir rutas de archivos
+                log_file = os.path.join(schema_folder, f"{schema_number}.txt")
+                xtf_file = os.path.join(schema_folder, f"{schema_number}.xtf")
+
+                # Construir y mostrar comando
+                cmd = self.build_export_command(schema, log_file, xtf_file)
+                cmd_display = self.build_export_command_display(schema, log_file, xtf_file)
+                self.export_log_message(f"Comando: {cmd_display}", "command")
+
+                # Ejecutar
+                self.export_process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    shell=True
+                )
+
+                # Leer salida en tiempo real
+                for line in self.export_process.stdout:
+                    line = line.strip()
+                    if line:
+                        if "error" in line.lower():
+                            self.export_log_message(f"  {line}", "error")
+                        elif "warning" in line.lower():
+                            self.export_log_message(f"  {line}", "warning")
+                        else:
+                            self.export_log_message(f"  {line}", "info")
+
+                self.export_process.wait()
+
+                if self.export_process.returncode == 0:
+                    self.export_log_message(f"Esquema '{schema}' exportado exitosamente", "success")
+                    self.export_log_message(f"  XTF: {xtf_file}", "success")
+                    self.export_log_message(f"  Log: {log_file}", "success")
+                    successful += 1
+                else:
+                    self.export_log_message(
+                        f"Error exportando esquema '{schema}' (codigo: {self.export_process.returncode})", "error")
+                    failed += 1
+
+            except Exception as e:
+                self.export_log_message(f"Error exportando '{schema}': {str(e)}", "error")
+                failed += 1
+
+        # Resumen
+        self.export_log_message("", "info")
+        self.export_log_message("=" * 60, "info")
+        self.export_log_message("RESUMEN DE EXPORTACION", "info")
+        self.export_log_message("=" * 60, "info")
+        self.export_log_message(f"Esquemas exportados exitosamente: {successful}", "success" if successful > 0 else "info")
+        self.export_log_message(f"Esquemas con errores: {failed}", "error" if failed > 0 else "info")
+        self.export_log_message(f"Carpeta de salida: {output_path}", "info")
+        self.export_log_message("=" * 60, "info")
+
+        # Restaurar estado
+        self.export_is_running = False
+        self.export_process = None
+        self.root.after(0, self.restore_export_buttons)
+        self.root.after(0, lambda: self.status_var.set(
+            f"Exportacion completada: {successful} exitosos, {failed} errores"))
+
+    def restore_export_buttons(self):
+        """Restaurar estado de botones de exportacion"""
+        self.export_execute_btn.config(state=tk.NORMAL)
+        self.export_stop_btn.config(state=tk.DISABLED)
+
+    def stop_export(self):
+        """Detener exportacion"""
+        if messagebox.askyesno("Confirmar", "Detener la exportacion?"):
+            self.export_is_running = False
+            if self.export_process:
+                self.export_process.terminate()
+            self.export_log_message("Deteniendo proceso de exportacion...", "warning")
+
+    # ============================================
+    # METODOS DE VALIDACION XTF
+    # ============================================
+
+    def create_validate_tab(self):
+        """Crear pestana de validacion XTF"""
+
+        # Canvas con scroll
+        canvas = tk.Canvas(self.tab_validate)
+        scrollbar = ttk.Scrollbar(self.tab_validate, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # ========== SECCION: Rutas de Validacion ==========
+        paths_frame = ttk.LabelFrame(scrollable_frame, text="Rutas de Archivos", padding="10")
+        paths_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Ruta ilivalidator JAR
+        jar_frame = ttk.Frame(paths_frame)
+        jar_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(jar_frame, text="Archivo ilivalidator.jar:", width=20).pack(side=tk.LEFT)
+        self.validate_jar_path = ttk.Entry(jar_frame, width=60)
+        self.validate_jar_path.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        def browse_validate_jar():
+            filename = filedialog.askopenfilename(
+                title="Seleccionar archivo JAR de ilivalidator",
+                filetypes=[("JAR files", "*.jar"), ("All files", "*.*")])
+            if filename:
+                self.validate_jar_path.delete(0, tk.END)
+                self.validate_jar_path.insert(0, filename)
+
+        ttk.Button(jar_frame, text="Examinar...", command=browse_validate_jar).pack(side=tk.LEFT)
+
+        # Carpeta de modelos (modeldir)
+        modeldir_frame = ttk.Frame(paths_frame)
+        modeldir_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(modeldir_frame, text="Carpeta de modelos:", width=20).pack(side=tk.LEFT)
+        self.validate_modeldir = ttk.Entry(modeldir_frame, width=60)
+        self.validate_modeldir.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        def browse_validate_modeldir():
+            folder = filedialog.askdirectory(title="Seleccionar carpeta con archivos de modelo")
+            if folder:
+                self.validate_modeldir.delete(0, tk.END)
+                self.validate_modeldir.insert(0, folder)
+
+        ttk.Button(modeldir_frame, text="Examinar...", command=browse_validate_modeldir).pack(side=tk.LEFT)
+
+        # Nombre del modelo
+        model_frame = ttk.Frame(paths_frame)
+        model_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(model_frame, text="Nombre del modelo:", width=20).pack(side=tk.LEFT)
+        self.validate_model_name = ttk.Entry(model_frame, width=50)
+        self.validate_model_name.pack(side=tk.LEFT, padx=5)
+        self.validate_model_name.insert(0, "Modelo_Aplicacion_LADMCOL_SINIC_V1_0")
+
+        # ========== SECCION: Archivos XTF ==========
+        xtf_frame = ttk.LabelFrame(scrollable_frame, text="Archivos XTF a Validar", padding="10")
+        xtf_frame.pack(fill=tk.X, pady=(0, 10))
+
+        # Carpeta de entrada
+        input_frame = ttk.Frame(xtf_frame)
+        input_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(input_frame, text="Carpeta de entrada:", width=20).pack(side=tk.LEFT)
+        self.validate_input_path = ttk.Entry(input_frame, width=60)
+        self.validate_input_path.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+
+        def browse_validate_input():
+            folder = filedialog.askdirectory(title="Seleccionar carpeta con archivos XTF")
+            if folder:
+                self.validate_input_path.delete(0, tk.END)
+                self.validate_input_path.insert(0, folder)
+
+        ttk.Button(input_frame, text="Examinar...", command=browse_validate_input).pack(side=tk.LEFT)
+
+        # Botones de escaneo y seleccion
+        scan_frame = ttk.Frame(xtf_frame)
+        scan_frame.pack(fill=tk.X, pady=(5, 0))
+
+        ttk.Button(scan_frame, text="Escanear Carpeta", command=self.scan_xtf_files).pack(side=tk.LEFT, padx=2)
+        ttk.Button(scan_frame, text="Seleccionar Todos", command=self.select_all_xtf).pack(side=tk.LEFT, padx=2)
+        ttk.Button(scan_frame, text="Deseleccionar Todos", command=self.deselect_all_xtf).pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(scan_frame, text="  (Ctrl+Click para seleccion multiple)", foreground="gray").pack(side=tk.LEFT, padx=10)
+
+        # Listbox de archivos XTF
+        xtf_list_frame = ttk.Frame(xtf_frame)
+        xtf_list_frame.pack(fill=tk.X, pady=(5, 0))
+
+        self.validate_xtf_listbox = tk.Listbox(xtf_list_frame, height=8, selectmode=tk.EXTENDED, exportselection=False)
+        xtf_scrollbar = ttk.Scrollbar(xtf_list_frame, orient=tk.VERTICAL, command=self.validate_xtf_listbox.yview)
+        self.validate_xtf_listbox.configure(yscrollcommand=xtf_scrollbar.set)
+
+        self.validate_xtf_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        xtf_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Info de seleccion
+        self.validate_xtf_info = ttk.Label(xtf_frame, text="0 archivo(s) encontrado(s), 0 seleccionado(s)", foreground="gray")
+        self.validate_xtf_info.pack(anchor=tk.W, pady=(5, 0))
+
+        self.validate_xtf_listbox.bind("<<ListboxSelect>>", self.on_validate_xtf_selected)
+
+        # ========== SECCION: Ejecucion de Validacion ==========
+        exec_frame = ttk.LabelFrame(scrollable_frame, text="Ejecucion", padding="10")
+        exec_frame.pack(fill=tk.X, pady=(0, 10))
+
+        control_frame = ttk.Frame(exec_frame)
+        control_frame.pack(fill=tk.X)
+
+        self.validate_execute_btn = ttk.Button(control_frame, text="VALIDAR", command=self.execute_validation)
+        self.validate_execute_btn.pack(side=tk.LEFT, padx=2)
+
+        self.validate_stop_btn = ttk.Button(control_frame, text="DETENER", command=self.stop_validation, state=tk.DISABLED)
+        self.validate_stop_btn.pack(side=tk.LEFT, padx=2)
+
+        ttk.Label(control_frame,
+                 text="Se generara un log de validacion junto a cada archivo XTF",
+                 foreground="gray", font=("", 8)).pack(side=tk.LEFT, padx=20)
+
+        # Log de validacion
+        log_frame = ttk.LabelFrame(scrollable_frame, text="Log de Validacion", padding="10")
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.validate_log_text = scrolledtext.ScrolledText(log_frame, height=12, wrap=tk.WORD)
+        self.validate_log_text.pack(fill=tk.BOTH, expand=True)
+
+        self.validate_log_text.tag_configure("info", foreground="black")
+        self.validate_log_text.tag_configure("success", foreground="green")
+        self.validate_log_text.tag_configure("error", foreground="red")
+        self.validate_log_text.tag_configure("warning", foreground="orange")
+        self.validate_log_text.tag_configure("command", foreground="blue")
+
+        log_buttons = ttk.Frame(log_frame)
+        log_buttons.pack(fill=tk.X, pady=(5, 0))
+
+        ttk.Button(log_buttons, text="Limpiar Log", command=self.clear_validate_log).pack(side=tk.LEFT, padx=2)
+        ttk.Button(log_buttons, text="Guardar Log", command=self.save_validate_log).pack(side=tk.LEFT, padx=2)
+
+        # Empaquetar canvas y scrollbar
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+    def scan_xtf_files(self):
+        """Escanear carpeta buscando archivos .xtf en subcarpetas"""
+        input_path = self.validate_input_path.get()
+        if not input_path or not os.path.isdir(input_path):
+            messagebox.showwarning("Aviso", "Seleccione una carpeta de entrada valida")
+            return
+
+        self.validate_xtf_listbox.delete(0, tk.END)
+        self.validate_xtf_files = []
+
+        for root_dir, dirs, files in os.walk(input_path):
+            for f in sorted(files):
+                if f.lower().endswith('.xtf'):
+                    full_path = os.path.join(root_dir, f)
+                    rel_path = os.path.relpath(full_path, input_path)
+                    self.validate_xtf_files.append(full_path)
+                    self.validate_xtf_listbox.insert(tk.END, rel_path)
+
+        self.validate_xtf_info.config(
+            text=f"{len(self.validate_xtf_files)} archivo(s) encontrado(s), 0 seleccionado(s)")
+        self.status_var.set(f"{len(self.validate_xtf_files)} archivos .xtf encontrados en '{input_path}'")
+
+        if not self.validate_xtf_files:
+            messagebox.showinfo("Info", f"No se encontraron archivos .xtf en '{input_path}'")
+
+    def on_validate_xtf_selected(self, event):
+        """Evento al seleccionar archivo(s) XTF"""
+        selected = self.validate_xtf_listbox.curselection()
+        total = len(self.validate_xtf_files)
+        self.validate_xtf_info.config(
+            text=f"{total} archivo(s) encontrado(s), {len(selected)} seleccionado(s)")
+
+    def select_all_xtf(self):
+        """Seleccionar todos los archivos XTF"""
+        self.validate_xtf_listbox.select_set(0, tk.END)
+        self.on_validate_xtf_selected(None)
+
+    def deselect_all_xtf(self):
+        """Deseleccionar todos los archivos XTF"""
+        self.validate_xtf_listbox.select_clear(0, tk.END)
+        self.on_validate_xtf_selected(None)
+
+    def get_selected_xtf_files(self):
+        """Obtener lista de archivos XTF seleccionados"""
+        selection = self.validate_xtf_listbox.curselection()
+        return [self.validate_xtf_files[i] for i in selection]
+
+    def validate_validation_config(self):
+        """Validar configuracion antes de ejecutar validacion"""
+        errors = []
+
+        if not self.validate_jar_path.get() or not os.path.exists(self.validate_jar_path.get()):
+            errors.append("Archivo ilivalidator.jar no especificado o no existe")
+
+        if not self.validate_model_name.get():
+            errors.append("Nombre del modelo no especificado")
+
+        if not self.validate_input_path.get() or not os.path.isdir(self.validate_input_path.get()):
+            errors.append("Carpeta de entrada no especificada o no existe")
+
+        if not self.get_selected_xtf_files():
+            errors.append("No hay archivos XTF seleccionados para validar")
+
+        return errors
+
+    def build_validation_command(self, xtf_path, log_file):
+        """Construir comando ilivalidator para un archivo XTF"""
+        cmd = [
+            'java', '-jar', self.validate_jar_path.get(),
+        ]
+
+        # Agregar modeldir si se especifico
+        modeldir = self.validate_modeldir.get()
+        if modeldir:
+            cmd.extend(['--modeldir', modeldir])
+
+        # Agregar modelo
+        model_name = self.validate_model_name.get()
+        if model_name:
+            cmd.extend(['--models', model_name])
+
+        # Agregar log
+        cmd.extend(['--log', log_file])
+
+        # Archivo XTF a validar (ultimo argumento)
+        cmd.append(xtf_path)
+
+        return cmd
+
+    def execute_validation(self):
+        """Ejecutar validacion de archivos XTF"""
+        errors = self.validate_validation_config()
+        if errors:
+            messagebox.showerror("Errores de Configuracion", "\n".join(errors))
+            return
+
+        selections = self.get_selected_xtf_files()
+
+        confirm_msg = f"RESUMEN DE VALIDACION XTF\n\n"
+        confirm_msg += f"Modelo: {self.validate_model_name.get()}\n"
+        confirm_msg += f"Archivos a validar: {len(selections)}\n\n"
+
+        files_preview = []
+        for f in selections[:10]:
+            files_preview.append(f"  - {os.path.basename(f)}")
+        if len(selections) > 10:
+            files_preview.append(f"  ... y {len(selections)-10} mas")
+        confirm_msg += "\n".join(files_preview)
+        confirm_msg += "\n\nContinuar?"
+
+        if not messagebox.askyesno("Confirmar Validacion", confirm_msg):
+            return
+
+        self.validate_is_running = True
+        self.validate_execute_btn.config(state=tk.DISABLED)
+        self.validate_stop_btn.config(state=tk.NORMAL)
+
+        thread = threading.Thread(target=self.execute_validation_files, args=(selections,))
+        thread.daemon = True
+        thread.start()
+
+    def execute_validation_files(self, selections):
+        """Ejecutar validacion de archivos XTF (en hilo separado)"""
+        self.validate_log_message("=" * 60, "info")
+        self.validate_log_message("INICIO DE PROCESO - VALIDACION XTF", "info")
+        self.validate_log_message("=" * 60, "info")
+        self.validate_log_message(f"Modelo: {self.validate_model_name.get()}", "info")
+        self.validate_log_message(f"Archivos: {len(selections)}", "info")
+        self.validate_log_message("", "info")
+
+        successful = 0
+        failed = 0
+
+        for i, xtf_path in enumerate(selections, 1):
+            if not self.validate_is_running:
+                self.validate_log_message("Proceso detenido por el usuario", "warning")
+                break
+
+            xtf_name = os.path.basename(xtf_path)
+            xtf_dir = os.path.dirname(xtf_path)
+            base_name = os.path.splitext(xtf_name)[0]
+            log_file = os.path.join(xtf_dir, f"{base_name}_validacion.log")
+
+            self.validate_log_message("", "info")
+            self.validate_log_message(f"[{i}/{len(selections)}] Validando: {xtf_name}", "info")
+            self.validate_log_message("-" * 40, "info")
+            self.status_var.set(f"Validando {xtf_name} ({i}/{len(selections)})")
+
+            try:
+                cmd = self.build_validation_command(xtf_path, log_file)
+                cmd_display = ' '.join(cmd)
+                self.validate_log_message(f"Comando: {cmd_display}", "command")
+
+                self.validate_process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    shell=True
+                )
+
+                for line in self.validate_process.stdout:
+                    line = line.strip()
+                    if line:
+                        if "error" in line.lower():
+                            self.validate_log_message(f"  {line}", "error")
+                        elif "warning" in line.lower():
+                            self.validate_log_message(f"  {line}", "warning")
+                        else:
+                            self.validate_log_message(f"  {line}", "info")
+
+                self.validate_process.wait()
+
+                if self.validate_process.returncode == 0:
+                    self.validate_log_message(f"Archivo '{xtf_name}' VALIDO", "success")
+                    self.validate_log_message(f"  Log: {log_file}", "success")
+                    successful += 1
+                else:
+                    self.validate_log_message(
+                        f"Archivo '{xtf_name}' tiene ERRORES (codigo: {self.validate_process.returncode})", "error")
+                    self.validate_log_message(f"  Log: {log_file}", "error")
+                    failed += 1
+
+            except Exception as e:
+                self.validate_log_message(f"Error validando '{xtf_name}': {str(e)}", "error")
+                failed += 1
+
+        # Resumen
+        self.validate_log_message("", "info")
+        self.validate_log_message("=" * 60, "info")
+        self.validate_log_message("RESUMEN DE VALIDACION", "info")
+        self.validate_log_message("=" * 60, "info")
+        self.validate_log_message(f"Archivos validos: {successful}", "success" if successful > 0 else "info")
+        self.validate_log_message(f"Archivos con errores: {failed}", "error" if failed > 0 else "info")
+        self.validate_log_message("=" * 60, "info")
+
+        # Restaurar estado
+        self.validate_is_running = False
+        self.validate_process = None
+        self.root.after(0, self.restore_validate_buttons)
+        self.root.after(0, lambda: self.status_var.set(
+            f"Validacion completada: {successful} validos, {failed} con errores"))
+
+    def restore_validate_buttons(self):
+        """Restaurar estado de botones de validacion"""
+        self.validate_execute_btn.config(state=tk.NORMAL)
+        self.validate_stop_btn.config(state=tk.DISABLED)
+
+    def stop_validation(self):
+        """Detener validacion"""
+        if messagebox.askyesno("Confirmar", "Detener la validacion?"):
+            self.validate_is_running = False
+            if self.validate_process:
+                self.validate_process.terminate()
+            self.validate_log_message("Deteniendo proceso de validacion...", "warning")
+
+    def validate_log_message(self, message, tag="info"):
+        """Agregar mensaje al log de validacion"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.validate_log_text.insert(tk.END, f"[{timestamp}] {message}\n", tag)
+        self.validate_log_text.see(tk.END)
+        self.root.update_idletasks()
+
+    def clear_validate_log(self):
+        """Limpiar log de validacion"""
+        self.validate_log_text.delete("1.0", tk.END)
+
+    def save_validate_log(self):
+        """Guardar log de validacion a archivo"""
+        filename = filedialog.asksaveasfilename(
+            defaultextension=".log",
+            filetypes=[("Log files", "*.log"), ("Text files", "*.txt"), ("All files", "*.*")],
+            initialfilename=f"validacion_xtf_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        )
+        if filename:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(self.validate_log_text.get("1.0", tk.END))
+            self.status_var.set(f"Log de validacion guardado: {filename}")
+
+    # ============================================
     # METODOS DE CIERRE
     # ============================================
 
     def on_closing(self):
         """Evento al cerrar la ventana"""
-        if self.is_running:
+        if self.is_running or self.export_is_running or self.validate_is_running:
             if not messagebox.askyesno("Confirmar", "Hay un proceso en ejecucion. Salir de todas formas?"):
                 return
             self.is_running = False
+            self.export_is_running = False
+            self.validate_is_running = False
             if self.process:
                 self.process.terminate()
+            if self.export_process:
+                self.export_process.terminate()
+            if self.validate_process:
+                self.validate_process.terminate()
 
         # Guardar configuracion actual
         self.save_last_profile()

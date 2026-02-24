@@ -1,73 +1,41 @@
-# Creacion de Modelos Fisicos LADM-COL - Windows
+# Administrador de Modelos LADM
 
-Sistema para la creacion automatica de modelos fisicos de bases de datos PostgreSQL/PostGIS basados en archivos INTERLIS (.ili) bajo el estandar LADM-COL.
+Herramienta para gestionar esquemas LADM-COL en PostgreSQL/PostGIS.
 
-## Dos Formas de Uso
+## Funcionalidades
 
-### Opcion 1: Interfaz Grafica (Recomendada para usuarios)
+- **Crear Esquemas**: Genera modelos fisicos a partir de archivos INTERLIS (.ili) usando ili2pg
+- **Exportar XTF**: Exporta datos de esquemas a archivos XTF
+- **Validar XTF**: Valida archivos XTF contra modelos INTERLIS usando ilivalidator
+
+## Inicio rapido
 
 ```cmd
 ejecutar_interfaz.bat
 ```
 
-La interfaz grafica permite:
-- Seleccionar archivos y carpetas visualmente
-- Guardar perfiles de configuracion reutilizables
-- Ver lista de modelos .ili disponibles
-- Vista previa del comando antes de ejecutar
-- Monitorear progreso en tiempo real
-- Funciona con CUALQUIER modelo INTERLIS
-
-**Manual completo**: [MANUAL_INTERFAZ.md](MANUAL_INTERFAZ.md)
-
-### Opcion 2: Linea de Comandos (Para automatizacion)
-
-```cmd
-REM 1. Editar configuracion
-notepad config.json
-
-REM 2. Ejecutar
-python creacion_modelos_fisicos.py
-```
-
-**Documentacion**: [README_PRINCIPAL.md](README_PRINCIPAL.md)
-
----
-
-## Documentacion Completa
-
-| Archivo | Descripcion |
-|---------|-------------|
-| [MANUAL_INTERFAZ.md](MANUAL_INTERFAZ.md) | Manual de la interfaz grafica |
-| [README_PRINCIPAL.md](README_PRINCIPAL.md) | Guia de inicio rapido (CLI) |
-| [INSTALACION_COMPLETA.md](INSTALACION_COMPLETA.md) | Guia paso a paso detallada |
-| [CHECKLIST_VALIDACION.md](CHECKLIST_VALIDACION.md) | Lista de verificacion |
-| [EJEMPLOS_DE_USO.md](EJEMPLOS_DE_USO.md) | Ejemplos practicos |
-| [RESUMEN_EJECUTIVO.md](RESUMEN_EJECUTIVO.md) | Resumen del proyecto |
-
 ## Requisitos
 
 - Windows 10/11 (64-bit)
-- PostgreSQL 12+ con PostGIS
+- Python 3.8+ (con `pip install psycopg2-binary`)
 - Java 8 (JRE 1.8.0)
-- Python 3.8+
-- psycopg2-binary (`pip install psycopg2-binary`)
+- PostgreSQL 12+ con PostGIS
 
-## Estructura
+## Uso por linea de comandos
 
+```cmd
+REM Copiar y editar configuracion
+copy config.json.ejemplo config.json
+notepad config.json
+
+REM Ejecutar
+ejecutar_creacion.bat
 ```
-windows_version/
-    interfaz_ili2pg.py             <- Interfaz grafica
-    ejecutar_interfaz.bat          <- Iniciar interfaz
-    creacion_modelos_fisicos.py    <- Script CLI
-    ejecutar_creacion.bat          <- Wrapper CLI
-    config.json                    <- Configuracion CLI
-    ili2pg/                        <- Herramienta INTERLIS
-    ctm12/                         <- Script CTM12
-    modelo_acc_interno/            <- Modelos .ili
-    log/                           <- Logs de ejecucion
-```
+
+## Documentacion completa
+
+Consulte **[MANUAL.md](MANUAL.md)** para instrucciones detalladas de instalacion, configuracion y uso de todos los modulos.
 
 ---
 
-**Version:** 2.0 | **Fecha:** 2025 | **Agencia Catastral de Cundinamarca**
+**Version 2.0** | **Agencia Catastral de Cundinamarca**
