@@ -1,368 +1,230 @@
-# Manual - Administrador de Modelos LADM
+# Manual - Administrador de Modelos LADM-COL 3.0
 
 **Agencia Catastral de Cundinamarca (ACC)**
-**Version 2.0 - 2025**
 
 ---
 
-## 1. Introduccion
+## 1. Introducción
 
-El **Administrador de Modelos LADM** es una herramienta para gestionar esquemas LADM-COL en bases de datos PostgreSQL/PostGIS. Permite:
+La herramienta gestiona datos LADM-COL en PostgreSQL/PostGIS usando ili2pg 5.5.1 e ilivalidator 1.15.0.
+Está organizada como un flujo de cuatro pasos:
 
-- **Crear esquemas** a partir de modelos INTERLIS (.ili) usando ili2pg
-- **Exportar datos** de esquemas existentes a archivos XTF
-- **Validar archivos XTF** contra modelos INTERLIS usando ilivalidator
+| Paso | Módulo | Herramienta |
+|------|--------|-------------|
+| 1 | Validar XTF | ilivalidator |
+| 2 | Crear esquema | ili2pg `--schemaimport` |
+| 3 | Importar XTF | ili2pg `--import` / `--replace` |
+| 4 | Exportar XTF | ili2pg `--export` |
 
-Esta dirigida a equipos tecnicos de entidades territoriales que trabajan con el estandar LADM-COL para gestion catastral.
-
----
-
-## 2. Requisitos e Instalacion
-
-### Requisitos
-
-| Componente | Version minima |
-|------------|---------------|
-| Windows | 10/11 (64-bit) |
-| Python | 3.8+ |
-| Java | JRE 1.8.0 (Java 8) |
-| PostgreSQL | 12+ con PostGIS |
-
-### Pasos de instalacion
-
-1. **Instalar Python** desde https://www.python.org/downloads/
-   - Marcar "Add Python to PATH" durante la instalacion
-
-2. **Instalar Java 8** (JRE o JDK) desde https://www.java.com/
-
-3. **Instalar PostgreSQL** con la extension PostGIS
-
-4. **Instalar dependencia Python**:
-   ```cmd
-   pip install psycopg2-binary
-   ```
-
-5. **Descomprimir** el paquete del administrador en una carpeta local
-
-6. **Ejecutar**:
-   ```cmd
-   ejecutar_interfaz.bat
-   ```
+En la parte superior de la ventana siempre se ve la **base de datos** y el **perfil de modelo** activos.
+Todas las operaciones usan esa selección.
 
 ---
 
-## 3. Configuracion
+## 2. Instalación
 
-### Perfiles
+| Componente | Versión | Verificación |
+|------------|---------|--------------|
+| Windows | 10/11 64-bit | - |
+| Python | 3.10+ | `python --version` |
+| Java | 8+ | `java -version` |
+| PostgreSQL | 12+ con PostGIS | página *Inicio* > Estado del entorno |
 
-La aplicacion permite guardar y cargar **perfiles de configuracion** para reutilizar ajustes entre sesiones. Los perfiles almacenan todas las configuraciones de todas las pestanas.
+1. Clone el repositorio o descomprima el paquete en una carpeta local.
+2. Ejecute `windows_version\ejecutar_administrador.bat`. La primera vez:
+   - instala `PySide6`, `psycopg2-binary` y `keyring` (`requirements.txt`);
+   - descarga **ili2pg 5.5.1** e **ilivalidator 1.15.0** desde `downloads.interlis.ch` a la carpeta
+     `ili2pg/`. Cada archivo se verifica con su huella SHA-256 antes de instalarlo.
+3. Revise la página **Inicio**: muestra si Java, ili2pg, ilivalidator, la base de datos y el perfil de
+   modelo están listos. Si faltan las herramientas, aparece el botón **Descargar herramientas**.
 
-- **Guardar**: Almacena la configuracion actual con un nombre
-- **Guardar Como...**: Crea un nuevo perfil
-- **Cargar**: Restaura un perfil previamente guardado
-- **Eliminar**: Borra un perfil
-
-La ultima configuracion usada se restaura automaticamente al abrir la aplicacion.
-
-### Rutas de archivos
-
-| Campo | Descripcion |
-|-------|-------------|
-| Archivo ili2pg.jar | Ruta al JAR de ili2pg (incluido en `ili2pg/`) |
-| Script CTM12 (SQL) | Script SQL para insertar CTM12 (`ctm12/insert_ctm12_pg.sql`) |
-| Carpeta de modelos | Carpeta que contiene los archivos .ili |
-| Carpeta de logs | Donde se guardan los logs de ejecucion |
-
-### Base de datos
-
-| Campo | Valor tipico |
-|-------|-------------|
-| Host | localhost |
-| Puerto | 5432 |
-| Base de datos | nombre_bd |
-| Usuario | postgres |
-| Password | (su password) |
-
-Use el boton **Probar Conexion** para verificar la conectividad antes de ejecutar.
-
-### Opciones ili2pg
-
-En el panel derecho de la pestana "Configuracion" se encuentran las opciones de ili2pg. Estas permiten habilitar/deshabilitar funcionalidades del motor. Las opciones por defecto son las recomendadas para LADM-COL. Opciones principales:
-
-- **setupPgExt**: Configurar extensiones PostgreSQL
-- **coalesceCatalogueRef**: Unir referencias de catalogo
-- **createEnumTabs**: Crear tablas de enumeracion
-- **smart2Inheritance**: Herencia inteligente tipo 2
-- **strokeArcs**: Convertir arcos a segmentos
-- **createDatasetCol**: Crear columna de dataset
-- **createBasketCol**: Crear columna de basket
-- **defaultSrsCode**: 9377 (MAGNA-SIRGAS / CTM12)
-
-Se pueden seleccionar/deseleccionar todas o restaurar los valores predeterminados con los botones rapidos.
+Sin internet: copie la carpeta `ili2pg/` desde otra instalación, o indique la ruta de los JAR en
+*Configuración → Herramientas y general*.
 
 ---
 
-## 4. Modulo: Crear Esquemas
+## 3. Configuración
 
-Este modulo crea esquemas en PostgreSQL a partir de modelos INTERLIS.
+### Conexiones
 
-### Flujo de trabajo
+Cada conexión guarda servidor, puerto, base de datos y usuario. La contraseña se guarda en el
+**Administrador de credenciales de Windows** (si se marca *Recordar*); nunca se escribe en archivos.
+Use **Probar conexión** para verificar el acceso y la disponibilidad de PostGIS. Si la base de datos no
+existe, se crea al crear el primer esquema.
 
-1. En la pestana **Configuracion**:
-   - En el panel izquierdo: seleccione rutas, modelos, conexion BD, esquemas y SRS
-   - En el panel derecho: revise las opciones ili2pg habilitadas (las predeterminadas suelen ser correctas)
-   - Opcionalmente configure el script CTM12
+### Perfiles de modelo
 
-2. En la pestana **Crear Esquemas**:
-   - Use **Actualizar Vista Previa** para ver el comando que se ejecutara
-   - Presione **EJECUTAR** para iniciar la creacion
-   - Si un esquema ya existe, se le preguntara si desea recrear, actualizar u omitir
-   - Monitoree el progreso en el log en tiempo real
+Un perfil agrupa:
 
-### Esquemas existentes
+- **Carpeta de modelos** con los `.ili`.
+- **Modelos** para los que se crean tablas. Use *Usar sugeridos*: se incluyen todos los modelos con
+  contenido propio. Los modelos `TYPE` entran como dependencias.
+  > ili2pg solo crea tablas para los TOPIC de los modelos indicados; si se omite un modelo, sus clases
+  > quedan sin tabla y la importación se bloquea.
+- **EPSG** (9377 = MAGNA-SIRGAS Origen-Nacional) y **script previo** (CTM12).
+- **Opciones de ili2pg** agrupadas, con descripción en cada casilla.
 
-Cuando un esquema ya existe en la base de datos, la aplicacion ofrece tres opciones:
+La herramienta avisa si un modelo está definido en dos archivos de la carpeta.
 
-- **RECREAR**: Elimina el esquema existente y lo crea de nuevo
-- **ACTUALIZAR**: Ejecuta ili2pg sobre el esquema existente (agrega modelos)
-- **OMITIR**: No procesa ese esquema
+**Importante:** los modelos SINIC e Interno ACC **exigen la opción *Columna de basket***
+(`createBasketCol`). Esa opción además permite reemplazar los datos de un municipio al importar.
 
-Se puede marcar "Aplicar esta decision a todos" para no preguntar por cada esquema.
+### Herramientas y general
 
----
+- Rutas de Java, ili2pg e ilivalidator. Si se dejan vacías, se usa Java del sistema (`JAVA_HOME` o el
+  `PATH`) y las versiones fijadas descargadas en `ili2pg/`.
+- Memoria máxima de Java, para XTF muy grandes.
+- **Prefijo de esquemas** (por defecto `cun`). En el modo "un esquema por municipio", el esquema es
+  prefijo + código DIVIPOLA, por ejemplo `cun25279`.
+- Carpeta de logs y tema (claro, oscuro o según el sistema).
+- **Importar perfiles de la versión 2.0.** Las contraseñas que estaban en texto plano pasan al
+  Administrador de credenciales.
 
-## 5. Modulo: Exportar XTF
-
-Este modulo exporta datos de esquemas PostgreSQL a archivos XTF (formato de transferencia INTERLIS).
-
-### Configuracion
-
-1. En la pestana **Exportar XTF**:
-   - Seleccione la ruta al JAR de ili2pg (puede ser diferente al de creacion)
-   - Opcionalmente seleccione la carpeta de modelos (modeldir)
-   - Seleccione la carpeta de salida donde se crearan los archivos
-   - Ingrese el nombre del modelo (ej: `Modelo_Aplicacion_LADMCOL_SINIC_V1_0`)
-   - Configure la conexion a la base de datos
-
-### Deteccion de esquemas
-
-- Presione **Detectar Esquemas (cun*)** para buscar automaticamente esquemas que empiecen con "cun" en la base de datos
-- Seleccione los esquemas que desea exportar (Ctrl+Click para seleccion multiple)
-
-### Ejecucion
-
-- Presione **EXPORTAR XTF** para iniciar
-- Para cada esquema se crea una subcarpeta con el numero del esquema (ej: `25019/`)
-- Dentro de cada subcarpeta se genera:
-  - `{numero}.xtf` - Archivo de datos
-  - `{numero}.txt` - Log de la exportacion
+La configuración se guarda en `%APPDATA%\LADMAdmin\settings.json`, sin contraseñas. Se conserva al
+actualizar la aplicación.
 
 ---
 
-## 6. Modulo: Validar XTF
+## 4. Organización de los datos: dos modos
 
-Este modulo valida archivos XTF contra modelos INTERLIS usando **ilivalidator**.
+| Modo | Esquemas | Cuándo usarlo |
+|------|----------|---------------|
+| **Un esquema por municipio** | `cun25279`, `cun25436`, ... | Entregas independientes por municipio. |
+| **Esquema único con datasets** | `sinic_cundinamarca` con un dataset por municipio | Consultas departamentales y menos tablas. |
 
-### Configuracion
-
-1. En la pestana **Validar XTF**:
-   - Seleccione la ruta al JAR de ilivalidator (incluido en `ili2pg/ilivalidator-1.15.0/`)
-   - Opcionalmente seleccione la carpeta de modelos (modeldir)
-   - Ingrese el nombre del modelo contra el cual validar
-   - Seleccione la carpeta de entrada que contiene los archivos XTF
-
-### Escaneo de archivos
-
-- Presione **Escanear Carpeta** para buscar recursivamente archivos .xtf en la carpeta seleccionada
-- Los archivos encontrados se muestran en la lista con su ruta relativa
-- Seleccione los archivos que desea validar
-
-### Ejecucion y resultados
-
-- Presione **VALIDAR** para iniciar la validacion
-- Para cada archivo XTF se ejecuta ilivalidator
-- Se genera un log de validacion junto a cada archivo: `{nombre}_validacion.log`
-- El log en pantalla muestra el resultado de cada archivo (VALIDO o con ERRORES)
-- Al finalizar se muestra un resumen con el conteo de archivos validos y con errores
-
-### Ejemplo
-
-Para un archivo `25154/25154.xtf`:
-- Se genera el log: `25154/25154_validacion.log`
-- El log contiene el detalle de errores y advertencias de ilivalidator
+En ambos modos el **dataset** de cada municipio es su código DIVIPOLA. Así se puede reemplazar un
+municipio sin tocar a los demás.
 
 ---
 
-## 7. Uso por Linea de Comandos
+## 5. Paso 1 - Validar XTF
 
-Para automatizacion, se puede usar el script CLI directamente:
+1. Agregue archivos `.xtf`, `.zip` o carpetas (arrastrando o con los botones). Se buscan en subcarpetas.
+   Los XTF de los ZIP se extraen en `%LOCALAPPDATA%\LADMAdmin\trabajo\` y el ZIP original no se modifica.
+2. La tabla muestra el municipio detectado, los modelos de la cabecera y el tamaño.
+3. Pulse **Validar archivos**.
 
-### Configuracion via config.json
+Junto a cada archivo se generan `<nombre>_validacion.log` y `<nombre>_validacion.csv`. Si el XTF venía en
+un ZIP, se generan junto al ZIP con el nombre `<zip>_<xtf>_validacion.log`. **Doble clic** sobre un
+archivo abre la tabla de errores (mensaje, clase, TID, línea, coordenadas), con filtro y opción de copiar.
 
-Copie `config.json.ejemplo` a `config.json` y edite los valores:
+En *Modelos* se usa la carpeta del perfil activo u otra carpeta. ilivalidator toma los modelos de la
+cabecera de cada XTF. En *Opciones avanzadas* hay dos opciones más:
+- **Verificar referencias entre todos los objetos** (`--allObjectsAccessible`): reporta referencias a
+  objetos que no están en el archivo.
+- **Reporte en formato XTF** (`--xtflog`).
 
-```json
-{
-    "database": {
-        "host": "localhost",
-        "port": "5432",
-        "database": "nombre_base_datos",
-        "user": "postgres",
-        "password": "su_password"
-    },
-    "schemas": ["cun25019", "cun25035"],
-    "paths": {
-        "base_dir": "C:\\ruta\\a\\windows_version",
-        "jar": "ili2pg\\ili2pg-4.4.3.jar",
-        "ctm12": "ctm12\\insert_ctm12_pg.sql",
-        "model": "modelo_acc_interno\\Modelo_Interno_ACC_V3.ili",
-        "log_dir": "log"
-    },
-    "ili2pg": {
-        "srs_code": "9377",
-        "options": { ... }
-    }
-}
-```
+Al terminar, el botón **Ir a Importar** envía los archivos válidos al paso 3.
 
-### Ejecucion
+---
+
+## 6. Paso 2 - Crear esquema
+
+1. Elija el modo (sección 4).
+   - **Por municipio:** escriba los códigos DIVIPOLA o los nombres de esquema, o use *Tomar municipios
+     de archivos XTF*.
+   - **Esquema único:** escriba el nombre del esquema.
+2. **Verificar en la base de datos** muestra si cada esquema existe, con qué versión de ili2pg se creó y
+   si tiene datos.
+3. Revise el perfil de modelo. Si falta la columna de basket, aparece una advertencia.
+4. Si el esquema ya existe: *Preguntar*, *Omitir*, *Actualizar estructura* o *Recrear*.
+
+**Recrear es seguro:** el esquema original se renombra como respaldo y solo se elimina si la nueva
+creación termina bien. Si falla, se restaura automáticamente.
+
+La *Vista previa del comando ili2pg* muestra el comando exacto, con la contraseña oculta. Los logs quedan
+en `<carpeta de logs>/crear_esquema/`.
+
+---
+
+## 7. Paso 3 - Importar XTF
+
+1. **Destino:** un esquema por municipio (`cun<código>`) o un esquema único (se elige de la lista de
+   esquemas ili2db de la base de datos).
+2. **Archivos:** al agregarlos se analiza el plan sin escribir en la base de datos.
+
+| Estado | Significado |
+|--------|-------------|
+| Listo | El esquema existe, es compatible y no tiene datos de ese municipio. |
+| Ya tiene datos | Se aplicará la política de conflicto elegida. |
+| Bloqueado | No se puede importar. La columna *Observaciones* explica el motivo. |
+
+   Motivos de bloqueo:
+   - El esquema no existe. Créelo en el paso 2: la importación nunca crea esquemas.
+   - El XTF usa modelos que no están en el esquema; por ejemplo, un XTF del modelo Interno ACC sobre un
+     esquema SINIC.
+   - Hay clases del XTF sin tabla, porque el esquema se creó sin todos los modelos.
+   - Dos archivos del lote apuntan al mismo esquema y dataset.
+
+   Con doble clic se puede cambiar el esquema destino o el dataset. Las casillas excluyen archivos del
+   lote, y el menú contextual muestra los objetos por clase.
+3. **Si el destino ya tiene datos:**
+   - *Preguntar en cada caso*: muestra un diálogo con la opción *aplicar a los demás*.
+   - *Reemplazar*: ejecuta `--replace` del dataset del municipio. Es una sola transacción: si falla, los
+     datos anteriores se conservan. En el modo por municipio también elimina otros datasets del esquema.
+   - *Agregar como nuevo dataset*: conserva los datos actuales. Falla si el archivo repite objetos ya
+     cargados (restricciones UNIQUE).
+   - *No importar*: omite el archivo.
+4. **Opciones avanzadas:**
+   - Validar durante la importación (activada por defecto).
+   - Verificar los conteos por clase después de importar.
+   - Omitir errores de referencia o de geometría.
+
+Al finalizar, cada archivo indica si se importó y si los conteos de la base de datos coinciden con el XTF.
+Los logs quedan en `<carpeta de logs>/importar/`.
+
+---
+
+## 8. Paso 4 - Exportar XTF
+
+1. Pulse **Cargar desde la base de datos**. En modo por municipio se listan los esquemas ili2db con el
+   prefijo; en esquema único, los datasets.
+2. Marque los destinos, con filtro y botones *Todos* o *Ninguno*.
+3. Elija la carpeta de salida. Se crea `<salida>/<código>/<código>.xtf` y `<código>_exportacion.log`.
+4. Opciones: exportar los TID originales (recomendado) y validar durante la exportación.
+
+Al terminar, **Validar archivos exportados** los envía al paso 1.
+
+---
+
+## 9. Línea de comandos
 
 ```cmd
-REM Usando el script batch
-ejecutar_creacion.bat
-
-REM O directamente
-python creacion_modelos_fisicos.py
+ejecutar_administrador.bat listar                 :: conexiones y perfiles guardados
+ejecutar_administrador.bat herramientas           :: descarga ili2pg/ilivalidator si faltan
+ejecutar_administrador.bat validar <rutas...> [--perfil P] [--modeldir D] [--modelos A;B] [--todos-accesibles]
+ejecutar_administrador.bat crear --esquemas cun1,cun2 [--conexion C] [--perfil P] [--si-existe omitir|actualizar|recrear]
+ejecutar_administrador.bat importar <rutas...> [--conexion C] [--perfil P] [--esquema-unico E]
+        [--si-hay-datos cancelar|reemplazar|agregar] [--sin-validacion] [--solo-analizar]
+ejecutar_administrador.bat exportar --salida DIR (--esquemas a,b | --todos | --esquema-unico E)
 ```
+
+- Sin `--conexion` ni `--perfil` se usan los activos en la interfaz.
+- `importar --solo-analizar` muestra el plan (destino y estado de cada archivo) sin importar.
+- `exportar --esquema-unico E` exporta todos los datasets de ese esquema.
+- La contraseña se toma del Administrador de credenciales, de la variable `LADM_PGPASSWORD` o se pide
+  por consola.
+- El código de salida es 1 si algún elemento falló.
 
 ---
 
-## 8. Distribucion del paquete
+## 10. Solución de problemas
 
-Para compartir esta herramienta con otras personas o entidades, basta con entregar un archivo **ZIP** con el contenido de la carpeta `windows_version/`. No se requiere instalador.
+| Mensaje | Causa y solución |
+|---------|------------------|
+| `Model ... requires column T_basket` | Active *Columna de basket* en el perfil y vuelva a crear el esquema. |
+| Esquema "creado con ili2pg 4.x" | Recrée el esquema con la versión 5.5.1; mezclar versiones puede fallar. |
+| `llave duplicada viola restricción de unicidad` al agregar | El archivo ya estaba cargado. Use *Reemplazar*. |
+| `no existe la relación ...` | El esquema se creó sin todos los modelos. Use *Usar sugeridos* en el perfil y recrée el esquema. |
+| No se encontró Java | Instale Java 8+ o indique su ruta en Configuración > Herramientas. |
+| ili2pg / ilivalidator no encontrado | Pulse *Descargar herramientas* en Inicio o ejecute `ejecutar_administrador.bat herramientas`. |
+| La huella SHA-256 no coincide | La descarga se dañó o el archivo fue alterado. Vuelva a intentarlo; no se instala nada. |
+| Contraseña no guardada | Se pide al ejecutar. Marque *Recordar* para guardarla en Windows. |
 
-### Que incluir en el ZIP
-
-```
-administrador_modelos_ladm.zip
-  └─ administrador_modelos_ladm/
-       README.md
-       MANUAL.md
-       ejecutar_interfaz.bat
-       ejecutar_creacion.bat
-       config.json.ejemplo
-       interfaz_ili2pg.py
-       creacion_modelos_fisicos.py
-       ili2pg/                        (incluir completa: JARs de ili2pg e ilivalidator)
-       ctm12/                         (script insert_ctm12_pg.sql)
-       modelo_acc_interno/            (archivos .ili necesarios)
-```
-
-**No incluir** en el ZIP:
-- `config.json` (contiene passwords reales)
-- `log/` (se genera automaticamente)
-- `__pycache__/`
-- `.gitignore`
-
-### Que debe tener el destinatario (requisitos previos)
-
-| Componente | Como verificar |
-|------------|---------------|
-| Windows 10/11 | - |
-| Python 3.8+ | `python --version` |
-| Java 8 (JRE) | `java -version` |
-| PostgreSQL 12+ con PostGIS | Servicio corriendo en el equipo o accesible por red |
-| psycopg2-binary | `pip install psycopg2-binary` |
-
-### Pasos para el destinatario
-
-1. Descomprimir el ZIP en una carpeta local (ej: `C:\herramientas\administrador_modelos_ladm\`)
-2. Instalar la dependencia Python si no la tiene: `pip install psycopg2-binary`
-3. Hacer doble clic en `ejecutar_interfaz.bat`
-4. En la primera ejecucion, configurar las rutas y conexion a base de datos
-5. Guardar la configuracion como perfil para reutilizarla
-
-### Como generar el ZIP
-
-Desde la carpeta del proyecto:
-
-```cmd
-REM Desde la carpeta padre de windows_version
-cd C:\ladm_col\desarrollos\creacion_modelos_fisicos
-
-REM Crear ZIP excluyendo archivos innecesarios
-powershell Compress-Archive -Path windows_version\* -DestinationPath administrador_modelos_ladm.zip
-```
-
-O simplemente: clic derecho sobre la carpeta `windows_version` > "Comprimir en archivo ZIP", y luego eliminar del ZIP los archivos `config.json`, `log/` y `__pycache__/`.
-
-### Notas sobre actualizaciones
-
-Para distribuir una nueva version, genere un nuevo ZIP y pidales a los destinatarios que:
-1. Respalden su `config.json` si usan la linea de comandos
-2. Reemplacen todos los archivos con los del nuevo ZIP
-3. Los perfiles de la interfaz grafica se guardan en `%USERPROFILE%\.ili2pg_gui\` y se conservan entre versiones
+**Nota de seguridad:** ili2pg solo acepta la contraseña por línea de comandos (`--dbpwd`). La herramienta
+la oculta en pantalla y en los logs, pero durante la ejecución es visible para el mismo usuario en el
+administrador de tareas.
 
 ---
 
-## 9. Solucion de Problemas
-
-### "Python no esta instalado o no esta en el PATH"
-- Instale Python y asegurese de marcar "Add Python to PATH"
-- Reinicie la terminal despues de instalar
-
-### "Java no encontrado" o errores al ejecutar JAR
-- Instale Java 8 (JRE 1.8.0) y asegurese de que `java` este en el PATH
-- Verifique con: `java -version`
-
-### "psycopg2 no instalado"
-- Ejecute: `pip install psycopg2-binary`
-
-### Error de conexion a PostgreSQL
-- Verifique que PostgreSQL este corriendo
-- Verifique host, puerto, usuario y password
-- Verifique que el usuario tenga permisos de creacion de bases de datos/esquemas
-- Use el boton "Probar Conexion" para diagnosticar
-
-### "Archivo .jar no encontrado"
-- Verifique que la ruta al JAR es correcta
-- Los JARs se incluyen en las carpetas `ili2pg/` y `ili2pg/ilivalidator-1.15.0/`
-
-### Error "schema already exists"
-- Al recrear un esquema, seleccione la opcion "RECREAR" para eliminar el existente
-- Si esta actualizando, seleccione "ACTUALIZAR"
-
-### Errores de validacion XTF
-- Revise el log de validacion generado junto al archivo .xtf
-- Verifique que el nombre del modelo sea correcto
-- Verifique que la carpeta de modelos (modeldir) contenga los .ili necesarios
-
-### La interfaz no responde durante la ejecucion
-- Los procesos largos se ejecutan en hilos separados, la interfaz deberia seguir respondiendo
-- Si se congela, espere a que termine el proceso actual
-- Use el boton DETENER para cancelar un proceso en ejecucion
-
----
-
-## Estructura del paquete
-
-```
-windows_version/
-    interfaz_ili2pg.py             <- Interfaz grafica (4 pestanas)
-    ejecutar_interfaz.bat          <- Iniciar interfaz
-    creacion_modelos_fisicos.py    <- Script CLI
-    ejecutar_creacion.bat          <- Wrapper CLI
-    config.json.ejemplo            <- Plantilla de configuracion CLI
-    ili2pg/                        <- Herramienta ili2pg (JAR)
-      ili2pg-4.4.3.jar
-      ili2pg-5.5.1/
-      ilivalidator-1.15.0/         <- Herramienta ilivalidator (JAR)
-    ctm12/                         <- Script CTM12
-      insert_ctm12_pg.sql
-    modelo_acc_interno/            <- Modelos .ili de ejemplo
-    log/                           <- Logs de ejecucion
-```
-
----
-
-**Agencia Catastral de Cundinamarca - Area de Desarrollo**
+**Agencia Catastral de Cundinamarca - Área de Desarrollo**
