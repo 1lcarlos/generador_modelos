@@ -1,0 +1,46 @@
+# ---------------------------------------------------------------------------
+# Administrador de Modelos LADM-COL
+# ---------------------------------------------------------------------------
+
+# Herramientas externas: se descargan con `python -m ladm_admin herramientas`
+windows_version/ili2pg/
+windows_version/jre/
+
+# Datos catastrales y resultados (contienen informacion personal: no versionar)
+windows_version/xtf/
+*.xtf
+*.itf
+*_validacion.csv
+*_validacion.xtf
+
+# Logs y paquetes de distribucion
+windows_version/log/
+*.log
+*.zip
+
+# Modelo interno de la ACC (no se publica)
+windows_version/modelo_acc_interno/
+
+# Version anterior para Ubuntu (fuera del alcance de este repositorio)
+ubuntu_version/
+
+# Configuracion local con credenciales
+config.json
+*.properties
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+*.spec
+
+# Editores y herramientas
+.claude/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini

@@ -1,0 +1,17 @@
+# Normalizacion de fin de linea
+* text=auto
+
+# Scripts de Windows: siempre CRLF (cmd.exe falla con LF en etiquetas/goto)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Modelos INTERLIS y SQL
+*.ili text
+*.sql text
+
+# Binarios
+*.jar binary
+*.zip binary
+*.png binary
+*.ico binary
