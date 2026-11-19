@@ -1,0 +1,4 @@
+# Administrador de Modelos LADM-COL 3.0
+PySide6==6.8.3
+psycopg2-binary>=2.9
+keyring>=25.0
