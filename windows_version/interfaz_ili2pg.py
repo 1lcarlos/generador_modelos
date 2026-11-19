@@ -1284,16 +1284,24 @@ class Ili2pgGUI:
         model_grid = ttk.Frame(model_frame)
         model_grid.pack(fill=tk.X)
 
-        ttk.Label(model_grid, text="Nombre del modelo:").grid(row=0, column=0, sticky=tk.W, pady=2)
+        ttk.Label(model_grid, text="Modelo (fallback):").grid(row=0, column=0, sticky=tk.W, pady=2)
         self.export_model_name = ttk.Entry(model_grid, width=50)
         self.export_model_name.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
         self.export_model_name.insert(0, "Modelo_Aplicacion_LADMCOL_SINIC_V1_0")
 
-        ttk.Label(model_grid, text="Codigo EPSG:").grid(row=1, column=0, sticky=tk.W, pady=2)
+        self.export_detected_models_label = ttk.Label(model_grid, text="", foreground="gray")
+        self.export_detected_models_label.grid(row=0, column=2, sticky=tk.W, padx=10)
+
+        ttk.Button(model_grid, text="Detectar Modelos", command=self.refresh_detected_models).grid(row=0, column=3, padx=5)
+
+        self.export_models_info = ttk.Label(model_grid, text="", foreground="blue", wraplength=600)
+        self.export_models_info.grid(row=1, column=0, columnspan=4, sticky=tk.W, pady=2)
+
+        ttk.Label(model_grid, text="Codigo EPSG:").grid(row=2, column=0, sticky=tk.W, pady=2)
         self.export_srs_code = ttk.Entry(model_grid, width=10)
-        self.export_srs_code.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+        self.export_srs_code.grid(row=2, column=1, sticky=tk.W, padx=5, pady=2)
         self.export_srs_code.insert(0, "9377")
-        ttk.Label(model_grid, text="(9377 = MAGNA-SIRGAS / CTM12)", foreground="gray").grid(row=1, column=2, sticky=tk.W, padx=10)
+        ttk.Label(model_grid, text="(9377 = MAGNA-SIRGAS / CTM12)", foreground="gray").grid(row=2, column=2, sticky=tk.W, padx=10)
 
         # ========== SECCION: Conexion BD para Exportacion ==========
         db_frame = ttk.LabelFrame(scrollable_frame, text="Conexion a Base de Datos", padding="10")
@@ -1512,8 +1520,57 @@ class Ili2pgGUI:
             return schema_name[3:]
         return schema_name
 
+    def detect_models_from_modeldir(self, modeldir=None):
+        """Detectar nombres de modelos INTERLIS desde los archivos .ili en la carpeta de modelos"""
+        if modeldir is None:
+            modeldir = self.export_modeldir.get()
+        if not modeldir or not os.path.isdir(modeldir):
+            return []
+        import re
+        model_names = []
+        for filename in os.listdir(modeldir):
+            if filename.lower().endswith('.ili'):
+                filepath = os.path.join(modeldir, filename)
+                try:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                    for match in re.finditer(r'^\s*(?:CONTRACTED\s+|TYPE\s+|REFSYSTEM\s+)?MODEL\s+(\S+)', content, re.MULTILINE):
+                        model_names.append(match.group(1))
+                except Exception:
+                    pass
+        return model_names
+
+    def get_export_models_string(self):
+        """Obtener la cadena de modelos para --models (separados por ;)"""
+        modeldir = self.export_modeldir.get()
+        if modeldir and os.path.isdir(modeldir):
+            detected = self.detect_models_from_modeldir(modeldir)
+            if detected:
+                return ';'.join(detected)
+        # Fallback: usar el campo de texto manual
+        return self.export_model_name.get()
+
+    def refresh_detected_models(self):
+        """Detectar y mostrar modelos encontrados en la carpeta modeldir"""
+        modeldir = self.export_modeldir.get()
+        if not modeldir or not os.path.isdir(modeldir):
+            self.export_models_info.config(text="Carpeta de modelos no valida", foreground="red")
+            self.export_detected_models_label.config(text="")
+            return
+        detected = self.detect_models_from_modeldir(modeldir)
+        if detected:
+            self.export_detected_models_label.config(text=f"({len(detected)} modelos detectados)")
+            self.export_models_info.config(
+                text="Modelos: " + "; ".join(detected),
+                foreground="blue"
+            )
+        else:
+            self.export_detected_models_label.config(text="")
+            self.export_models_info.config(text="No se encontraron modelos en la carpeta", foreground="red")
+
     def build_export_command(self, schema, log_file, xtf_file):
         """Construir comando ili2pg para exportar un esquema a XTF"""
+        models_string = self.get_export_models_string()
         cmd = [
             'java', '-jar', self.export_jar_path.get(),
             '--export',
@@ -1525,7 +1582,7 @@ class Ili2pgGUI:
             '--dbpwd', self.export_db_password.get(),
             '--dbschema', schema,
             '--defaultSrsCode', self.export_srs_code.get(),
-            '--models', self.export_model_name.get(),
+            '--models', models_string,
         ]
 
         # Agregar modeldir si se especifico
@@ -1559,8 +1616,9 @@ class Ili2pgGUI:
         if not self.export_jar_path.get() or not os.path.exists(self.export_jar_path.get()):
             errors.append("Archivo ili2pg.jar no especificado o no existe")
 
-        if not self.export_model_name.get():
-            errors.append("Nombre del modelo no especificado")
+        models_string = self.get_export_models_string()
+        if not models_string:
+            errors.append("No se detectaron modelos. Especifique una carpeta de modelos (modeldir) con archivos .ili o un nombre de modelo manual")
 
         if not self.export_output_path.get():
             errors.append("Carpeta de salida no especificada")
@@ -1620,9 +1678,10 @@ class Ili2pgGUI:
         if len(schemas) > 10:
             schemas_preview.append(f"  ... y {len(schemas)-10} mas")
 
+        models_string = self.get_export_models_string()
         confirm_msg = f"RESUMEN DE EXPORTACION XTF\n\n"
         confirm_msg += f"Base de datos: {self.export_db_name.get()}\n"
-        confirm_msg += f"Modelo: {self.export_model_name.get()}\n"
+        confirm_msg += f"Modelos: {models_string}\n"
         confirm_msg += f"Carpeta de salida: {output_path}\n\n"
         confirm_msg += f"Esquemas a exportar ({len(schemas)}):\n"
         confirm_msg += "\n".join(schemas_preview)
@@ -1645,7 +1704,8 @@ class Ili2pgGUI:
         self.export_log_message("INICIO DE PROCESO - EXPORTACION XTF", "info")
         self.export_log_message("=" * 60, "info")
         self.export_log_message(f"Base de datos: {self.export_db_name.get()}", "info")
-        self.export_log_message(f"Modelo: {self.export_model_name.get()}", "info")
+        models_string = self.get_export_models_string()
+        self.export_log_message(f"Modelos: {models_string}", "info")
         self.export_log_message(f"Carpeta de salida: {output_path}", "info")
         self.export_log_message(f"Esquemas: {len(schemas)}", "info")
         self.export_log_message("", "info")
