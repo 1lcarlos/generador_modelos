@@ -388,14 +388,15 @@ class ImportPage(OperationPage):
         blocked = len(active) - len(runnable)
         req = self._request(params)
         text = (f"Se importarán <b>{len(runnable)}</b> archivo(s) en <b>{params.describe()}</b>."
-                + (f"<br>{blocked} archivo(s) bloqueado(s) se omitirán." if blocked else "")
+                + (f"<br>{blocked} archivo(s) bloqueado(s) no se importarán (quedarán registrados como error con su motivo)." if blocked else "")
                 + f"<br><br>Si el destino ya tiene datos: <b>{req.conflict_mode.label}</b>")
         if not req.disable_validation:
             text += "<br>Los datos se validan durante la importación."
         if QMessageBox.question(self, "Confirmar importación", text) != QMessageBox.Yes:
             return
         decide = lambda item: self.bridge.ask("import_conflict", item, default=(None, False))
-        self.run_job(run_import, req, runnable, items=[(it.key, it.source.display) for it in runnable], decide=decide)
+        # Los bloqueados también se envían: quedan en Resultados como error con su motivo (trazabilidad)
+        self.run_job(run_import, req, active, items=[(it.key, it.source.display) for it in active], decide=decide)
 
     def on_results(self, results) -> None:
         self._schedule_reanalysis()
