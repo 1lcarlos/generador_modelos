@@ -52,7 +52,7 @@ ejecutar_administrador.bat exportar --conexion local --perfil SINIC --todos --sa
 ```
 
 La contraseña se toma del Administrador de credenciales, de la variable `LADM_PGPASSWORD` o se pide por
-consola. El código de salida es `1` si algún elemento falló. Detalle completo en [MANUAL.md](MANUAL.md#9-línea-de-comandos).
+consola. El código de salida es `1` si algún elemento falló. Detalle completo en el [manual de usuario](../docs/manual_usuario.md#10-línea-de-comandos).
 
 ## Estructura
 
@@ -72,6 +72,7 @@ windows_version/
     ui/                        Interfaz PySide6 (pages/ = una página por paso)
     cli.py                     Línea de comandos
   tests/                       Pruebas unitarias
+  scripts/capturas_manual.py   Regenera las capturas del manual
   Modelos/SINIC/               Modelos INTERLIS incluidos (un perfil por carpeta)
   ctm12/                       Script previo con el sistema de referencia CTM12
 ```
@@ -83,6 +84,13 @@ No se versionan (`.gitignore`):
 - `modelo_acc_interno/`: modelo interno de la ACC. Para usarlo, cree un perfil de modelo que apunte a
   su carpeta.
 
+## Documentación
+
+- [Manual de usuario](../docs/manual_usuario.md) (con capturas)
+- [Estado de la implementación](../docs/estado_implementacion.md) y pendientes
+- [Decisiones de diseño](../docs/decisiones.md)
+- [Arquitectura y guía de desarrollo](../docs/arquitectura.md)
+
 ## Desarrollo
 
 ```cmd
@@ -91,6 +99,7 @@ python -m pytest tests
 python -m ladm_admin            :: abre la interfaz
 ```
 
+- Lea [arquitectura.md](../docs/arquitectura.md) antes de modificar el código.
 - La lógica va en `ladm_admin/core/` y no importa nada de Qt; la interfaz y el CLI solo la usan.
 - Las operaciones informan su avance con un `Reporter` y se detienen con un `CancelToken`. La interfaz
   las ejecuta en segundo plano (`ui/worker.py`).

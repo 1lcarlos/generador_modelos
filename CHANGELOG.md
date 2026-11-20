@@ -41,6 +41,15 @@ etiqueta `v2.0`.
 - Contraseñas guardadas en texto plano en los perfiles.
 - Líneas del log marcadas como error por contener la palabra "error".
 
+### Documentación (2026-11-20)
+- Manual de usuario con capturas en `docs/manual_usuario.md` (antes `windows_version/MANUAL.md`).
+- Nuevos `docs/estado_implementacion.md`, `docs/decisiones.md` y `docs/arquitectura.md`.
+- `windows_version/scripts/capturas_manual.py` para regenerar las capturas.
+- El README de la raíz estaba en UTF-16; ahora está en UTF-8.
+
+### Corregido (2026-11-20)
+- Importar: los archivos bloqueados no aparecían en Resultados. Ahora se reportan como error con su motivo.
+
 ### Limitaciones conocidas
 - ili2pg solo acepta la contraseña con `--dbpwd`: se oculta en pantalla y logs, pero es visible en el
   administrador de tareas mientras se ejecuta.

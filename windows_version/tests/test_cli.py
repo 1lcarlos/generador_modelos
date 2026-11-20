@@ -1,4 +1,4 @@
-"""El CLI debe aceptar exactamente las opciones documentadas en README y MANUAL."""
+"""El CLI debe aceptar exactamente las opciones documentadas en el README y el manual de usuario."""
 
 import re
 import shlex
@@ -42,7 +42,7 @@ def test_docs_only_use_existing_options():
     parser = build_parser()
     known = {name for sub in parser._subparsers._group_actions[0].choices.values()
              for a in sub._actions for name in a.option_strings}
-    for doc in (ROOT / "README.md", ROOT / "MANUAL.md"):
+    for doc in (ROOT / "README.md", ROOT.parent / "docs" / "manual_usuario.md"):
         used = set(re.findall(r"(?<![\w-])--[A-Za-z][A-Za-z-]+", doc.read_text(encoding="utf-8")))
         ili_flags = {u for u in used if u not in known}
         # Lo que no es opcion del CLI debe ser una opcion de ili2pg/ilivalidator mencionada en el texto
